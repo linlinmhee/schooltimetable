@@ -6,10 +6,11 @@
 // Required env vars in Netlify (Site settings → Environment variables):
 //   AZURE_OPENAI_API_KEY
 //   AZURE_OPENAI_ENDPOINT
-// Optional:
-//   AZURE_OPENAI_API_VERSION         (default: 2025-01-01-preview)
-//   AZURE_OPENAI_CHAT_DEPLOYMENT     (default: gpt-4.1-nano)
-//   AZURE_OPENAI_IMAGE_DEPLOYMENT    (default: gpt-image-2)
+//   AZURE_OPENAI_API_VERSION
+//   AZURE_OPENAI_CHAT_DEPLOYMENT
+//   AZURE_OPENAI_IMAGE_DEPLOYMENT
+// All are required (no defaults baked in) so that committed code contains
+// nothing matching env var values — keeps Netlify's secret scanner happy.
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -19,14 +20,21 @@ exports.handler = async (event) => {
   const {
     AZURE_OPENAI_API_KEY: apiKey,
     AZURE_OPENAI_ENDPOINT: rawEndpoint,
-    AZURE_OPENAI_API_VERSION: apiVersion = "2025-01-01-preview",
-    AZURE_OPENAI_CHAT_DEPLOYMENT: chatDeployment = "gpt-4.1-nano",
-    AZURE_OPENAI_IMAGE_DEPLOYMENT: imageDeployment = "gpt-image-2",
+    AZURE_OPENAI_API_VERSION: apiVersion,
+    AZURE_OPENAI_CHAT_DEPLOYMENT: chatDeployment,
+    AZURE_OPENAI_IMAGE_DEPLOYMENT: imageDeployment,
   } = process.env;
 
-  if (!apiKey || !rawEndpoint) {
+  const missing = [
+    !apiKey          && "AZURE_OPENAI_API_KEY",
+    !rawEndpoint     && "AZURE_OPENAI_ENDPOINT",
+    !apiVersion      && "AZURE_OPENAI_API_VERSION",
+    !chatDeployment  && "AZURE_OPENAI_CHAT_DEPLOYMENT",
+    !imageDeployment && "AZURE_OPENAI_IMAGE_DEPLOYMENT",
+  ].filter(Boolean);
+  if (missing.length) {
     return jsonResponse(500, {
-      error: "Server is missing AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT in environment.",
+      error: `Server is missing required env vars: ${missing.join(", ")}`,
     });
   }
   const endpoint = rawEndpoint.replace(/\/+$/, "");
