@@ -2,33 +2,80 @@
 // Provides:
 //   window.azure.complete({ messages })            → string (chat)
 //   window.azure.generateTimetableImage(imageFile, themeText) → { textResult, imageUrl }
+//
+// Credentials are read from a sibling `.env` file at runtime via fetch().
+// The page MUST be served by a local web server — opening index.html
+// directly via file:// will block the fetch.
 
 (function () {
-  // ── Credentials (no build step — plain HTML app) ──────────────────────────
-  const AZURE_ENDPOINT   = "https://foundry-songkran26-prj2-resource.services.ai.azure.com/api/projects/foundry-songkran26-prj2";
-  const AZURE_API_KEY    = "REDACTED-ROTATE-IN-AZURE";
-  const API_VERSION      = "2025-01-01-preview";
+  // ── Lazy .env loader ──────────────────────────────────────────────────────
+  let configPromise = null;
 
-  // Deployment names
-  const CHAT_DEPLOYMENT  = "gpt-4.1-nano";   // used for vision + theme JSON
-  const IMAGE_DEPLOYMENT = "gpt-image-2";    // used for image generation
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
-  function chatUrl() {
-    return `${AZURE_ENDPOINT}/openai/deployments/${CHAT_DEPLOYMENT}/chat/completions?api-version=${API_VERSION}`;
+  function loadConfig() {
+    if (configPromise) return configPromise;
+    configPromise = fetch(".env", { cache: "no-store" })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.text();
+      })
+      .then(parseEnv)
+      .then((env) => {
+        const cfg = {
+          apiKey:           env.AZURE_OPENAI_API_KEY,
+          endpoint:         (env.AZURE_OPENAI_ENDPOINT || "").replace(/\/+$/, ""),
+          apiVersion:       env.AZURE_OPENAI_API_VERSION  || "2025-01-01-preview",
+          chatDeployment:   env.AZURE_OPENAI_CHAT_DEPLOYMENT  || "gpt-4.1-nano",
+          imageDeployment: env.AZURE_OPENAI_IMAGE_DEPLOYMENT || "gpt-image-2",
+        };
+        if (!cfg.apiKey || !cfg.endpoint) {
+          throw new Error("Missing AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT in .env");
+        }
+        return cfg;
+      })
+      .catch((err) => {
+        configPromise = null; // allow retry
+        throw new Error(
+          `Could not load .env (${err.message}). ` +
+          `Make sure the app is served via a local web server, not opened as file://.`
+        );
+      });
+    return configPromise;
   }
 
-  function imageUrl() {
-    return `${AZURE_ENDPOINT}/openai/deployments/${IMAGE_DEPLOYMENT}/images/generations?api-version=${API_VERSION}`;
+  function parseEnv(text) {
+    const out = {};
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq === -1) continue;
+      const key = line.slice(0, eq).trim();
+      let val = line.slice(eq + 1).trim();
+      // strip surrounding quotes
+      if ((val.startsWith('"') && val.endsWith('"')) ||
+          (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      out[key] = val;
+    }
+    return out;
   }
 
-  async function post(url, body) {
+  // ── URL builders ──────────────────────────────────────────────────────────
+  function chatUrl(cfg) {
+    return `${cfg.endpoint}/openai/deployments/${cfg.chatDeployment}/chat/completions?api-version=${cfg.apiVersion}`;
+  }
+
+  function imageGenUrl(cfg) {
+    return `${cfg.endpoint}/openai/deployments/${cfg.imageDeployment}/images/generations?api-version=${cfg.apiVersion}`;
+  }
+
+  async function post(cfg, url, body) {
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "api-key": AZURE_API_KEY,
+        "api-key": cfg.apiKey,
       },
       body: JSON.stringify(body),
     });
@@ -40,10 +87,10 @@
   }
 
   // ── 1) Chat / vision completions ───────────────────────────────────────────
-  // Drop-in replacement for window.claude.complete({ messages })
   async function complete({ messages }) {
-    const data = await post(chatUrl(), {
-      model: CHAT_DEPLOYMENT,
+    const cfg = await loadConfig();
+    const data = await post(cfg, chatUrl(cfg), {
+      model: cfg.chatDeployment,
       messages,
       max_tokens: 4096,
       temperature: 0.7,
@@ -52,13 +99,10 @@
   }
 
   // ── 2) Two-step: image → text → generated image ────────────────────────────
-  /**
-   * @param {File}   imageFile   The uploaded timetable photo
-   * @param {string} themeText   The theme chosen by the user (e.g. "dinosaurs")
-   * @returns {{ textResult: string, imageUrl: string }}
-   */
   async function generateTimetableImage(imageFile, themeText) {
-    // ── Step 1: Vision call — extract timetable text from image ──────────────
+    const cfg = await loadConfig();
+
+    // Step 1: Vision — extract timetable text from image
     const base64 = await fileToBase64(imageFile);
     const visionMessages = [
       {
@@ -79,20 +123,20 @@
       },
     ];
 
-    const visionData = await post(chatUrl(), {
-      model: CHAT_DEPLOYMENT,
+    const visionData = await post(cfg, chatUrl(cfg), {
+      model: cfg.chatDeployment,
       messages: visionMessages,
       max_tokens: 2048,
       temperature: 0.3,
     });
     const textResult = visionData.choices?.[0]?.message?.content ?? "";
 
-    // ── Step 2: Image generation call ─────────────────────────────────────────
+    // Step 2: Image generation
     const systemPrompt = `create a timetable in theme of ${themeText} make it easy to read and friendly for kids`;
     const imagePrompt  = `${systemPrompt}\n\nTimetable content:\n${textResult}`;
 
-    const imgData = await post(imageUrl(), {
-      model: IMAGE_DEPLOYMENT,
+    const imgData = await post(cfg, imageGenUrl(cfg), {
+      model: cfg.imageDeployment,
       prompt: imagePrompt,
       n: 1,
       size: "1024x1024",
@@ -100,7 +144,6 @@
       output_format: "png",
     });
 
-    // Azure returns either a URL or base64 depending on response_format
     const img = imgData.data?.[0];
     let generatedImageUrl = "";
     if (img?.url) {
