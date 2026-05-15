@@ -33,89 +33,29 @@ function DecorPattern({ theme }) {
 }
 
 // ---------- UPLOAD SCREEN ----------
-function UploadScreen({ value, onChange, themePrompt, setThemePrompt, generating, onGenerate }) {
+function UploadScreen({ value, onChange, uploadedFile, setUploadedFile, themePrompt, setThemePrompt, generating, onGenerate }) {
   const [tab, setTab] = useState('image');
   const [fileName, setFileName] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
-  const [readingImage, setReadingImage] = useState(false);
-  const [aiImageUrl, setAiImageUrl] = useState(null);
-  const [aiGenerating, setAiGenerating] = useState(false);
-  const [aiError, setAiError] = useState(null);
-  const [uploadedFile, setUploadedFile] = useState(null);
   const fileRef = useRef(null);
   const QUICK_THEMES = ['🚀 space', '🦕 dinosaurs', '🐠 underwater', '🦄 unicorns', '🐯 jungle', '🤖 robots', '🍭 candy', '⚽ sports'];
 
-  const handleFile = async (file) => {
+  // Uploading just stores the file + preview. Vision extraction is deferred
+  // until the user clicks "Decorate it!" so the button is clickable instantly.
+  const handleFile = (file) => {
     if (!file) return;
     setFileName(file.name);
     setUploadedFile(file);
-    setAiImageUrl(null);
-    setAiError(null);
     const reader = new FileReader();
     reader.onload = (e) => setImagePreview(e.target.result);
     reader.readAsDataURL(file);
-    setReadingImage(true);
-    // Step 1: Vision call — extract timetable as markdown table
-    try {
-      const result = await window.azure.complete({
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: {
-                url: await fileToDataUrl(file),
-                detail: 'high'
-              }
-            },
-            { type: 'text', text: 'This is a school timetable image. Extract it as a Markdown table with columns: Time, Monday, Tuesday, Wednesday, Thursday, Friday. Only output the markdown table — no commentary, no fences.' }
-          ]
-        }]
-      });
-      if (result && result.includes('|')) {
-        onChange(result.trim());
-        setTab('paste');
-      }
-    } catch (e) {
-      console.warn('Image extraction unavailable', e);
-    } finally {
-      setReadingImage(false);
-    }
   };
 
-  // Step 2 (triggered separately): Generate AI-themed timetable image
-  const handleGenerateAiImage = async () => {
-    if (!uploadedFile || !themePrompt.trim()) return;
-    setAiGenerating(true);
-    setAiError(null);
-    setAiImageUrl(null);
-    try {
-      const { textResult, imageUrl: genUrl } = await window.azure.generateTimetableImage(uploadedFile, themePrompt);
-      if (genUrl) {
-        setAiImageUrl(genUrl);
-      } else {
-        setAiError('No image returned from Azure — check your deployment name and quota.');
-      }
-    } catch (e) {
-      console.error('AI image generation failed', e);
-      setAiError(`Generation failed: ${e.message}`);
-    } finally {
-      setAiGenerating(false);
-    }
-  };
-
-  function fileToDataUrl(file) {
-    return new Promise((res, rej) => {
-      const r = new FileReader();
-      r.onload = e => res(e.target.result);
-      r.onerror = rej;
-      r.readAsDataURL(file);
-    });
-  }
+  const canDecorate = (value.trim() || uploadedFile) && themePrompt.trim() && !generating;
 
   return (
     <div className="page" style={{ position: 'relative' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.1fr .9fr', gap: 36, alignItems: 'start' }}>
+      <div style={{ maxWidth: 820, margin: '0 auto' }}>
         <div>
           <div style={{ marginBottom: 10 }}>
             <span className="pill" style={{ background: 'var(--sun)' }}>STEP 1 / 3</span>
@@ -164,18 +104,12 @@ function UploadScreen({ value, onChange, themePrompt, setThemePrompt, generating
                 onDragOver={e => { e.preventDefault(); }}
                 onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files?.[0]); }}
               >
-                {readingImage ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-                    <div className="spinner" />
-                    <div className="h-display" style={{ fontSize: 20 }}>Reading your timetable…</div>
-                    <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>Squinting at the rows ✨</div>
-                  </div>
-                ) : imagePreview ? (
+                {imagePreview ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                     <img src={imagePreview} alt="preview" style={{ maxWidth: '100%', maxHeight: 220, borderRadius: 10, border: '2px solid var(--ink)' }} />
                     <div className="h-display">{fileName}</div>
                     <div style={{ fontSize: 13, color: 'var(--ink-soft)' }}>
-                      {value ? '✅ Extracted! Switch to “Paste text” to fine-tune.' : 'Couldn’t read it automatically — try pasting the text instead.'}
+                      ✅ Ready to decorate — pick a theme and hit the button!
                     </div>
                   </div>
                 ) : (
@@ -186,90 +120,6 @@ function UploadScreen({ value, onChange, themePrompt, setThemePrompt, generating
                 )}
                 <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files?.[0])} />
               </div>
-
-              {/* ── AI Image Generation Panel ───────────────────── */}
-              {uploadedFile && (
-                <div className="chunky" style={{
-                  marginTop: 16, padding: 20,
-                  background: 'linear-gradient(135deg, #fff9ee 0%, #fff0fa 100%)'
-                }}>
-                  <div className="h-display" style={{ fontSize: 18, fontWeight: 800, marginBottom: 6 }}>
-                    🎨 Generate AI-Themed Image
-                  </div>
-                  <div style={{ fontSize: 13, color: 'var(--ink-soft)', marginBottom: 12 }}>
-                    Pick a theme below and we'll call Azure gpt-image-2 to create a custom timetable image for you!
-                  </div>
-
-                  {/* Quick theme pills for image gen */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
-                    {QUICK_THEMES.map(q => (
-                      <button
-                        key={q}
-                        className="btn btn-sm"
-                        style={{ background: themePrompt.toLowerCase().includes(q.split(' ')[1]) ? 'var(--sun)' : 'white' }}
-                        onClick={() => setThemePrompt(q.split(' ').slice(1).join(' '))}
-                        disabled={aiGenerating}
-                      >{q}</button>
-                    ))}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-                    <input
-                      id="ai-theme-input"
-                      className="input"
-                      style={{ flex: '1 1 200px' }}
-                      placeholder="e.g. dinosaurs, space, cats…"
-                      value={themePrompt}
-                      onChange={e => setThemePrompt(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !aiGenerating) handleGenerateAiImage(); }}
-                      disabled={aiGenerating}
-                    />
-                    <button
-                      id="btn-generate-ai-image"
-                      className="btn btn-go"
-                      disabled={!themePrompt.trim() || aiGenerating}
-                      onClick={handleGenerateAiImage}
-                    >
-                      {aiGenerating ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                          <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2, borderColor: 'white', borderTopColor: 'transparent' }} />
-                          Generating…
-                        </span>
-                      ) : '✨ Generate AI Image'}
-                    </button>
-                  </div>
-
-                  {aiError && (
-                    <div style={{ fontSize: 13, color: 'var(--tomato)', marginBottom: 8, padding: '8px 12px', background: '#fff0ef', borderRadius: 10, border: '1.5px solid var(--tomato)' }}>
-                      ⚠️ {aiError}
-                    </div>
-                  )}
-
-                  {aiImageUrl && (
-                    <div style={{ marginTop: 8 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <div className="pill" style={{ background: 'var(--leaf)', color: 'white' }}>✅ AI Image Ready!</div>
-                        <a
-                          href={aiImageUrl}
-                          download={`timetable-${themePrompt.replace(/\s+/g,'-')}.png`}
-                          className="btn btn-primary btn-sm"
-                          style={{ textDecoration: 'none' }}
-                        >⬇️ Download</a>
-                      </div>
-                      <img
-                        id="ai-generated-image"
-                        src={aiImageUrl}
-                        alt="AI generated timetable"
-                        style={{
-                          width: '100%', borderRadius: 14,
-                          border: '2.5px solid var(--ink)',
-                          boxShadow: '5px 5px 0 var(--ink)'
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
@@ -307,7 +157,7 @@ function UploadScreen({ value, onChange, themePrompt, setThemePrompt, generating
           <div style={{ marginTop: 22, display: 'flex', gap: 12, alignItems: 'center' }}>
             <button
               className="btn btn-go"
-              disabled={!value || !value.trim() || !themePrompt.trim() || generating}
+              disabled={!canDecorate}
               onClick={onGenerate}
               style={{ fontSize: 19, padding: '14px 26px' }}
             >
@@ -318,67 +168,13 @@ function UploadScreen({ value, onChange, themePrompt, setThemePrompt, generating
                 </span>
               ) : '🎨 Decorate it!'}
             </button>
-            <button className="btn btn-ghost" onClick={() => onChange('')} disabled={generating}>Clear</button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => { onChange(''); setUploadedFile(null); setImagePreview(null); setFileName(null); }}
+              disabled={generating}
+            >Clear</button>
           </div>
         </div>
-
-        <UploadAside value={value} />
-      </div>
-    </div>
-  );
-}
-
-function UploadAside({ value }) {
-  const parsed = useMemo(() => {
-    try { return window.parseTimetable(value); } catch { return null; }
-  }, [value]);
-
-  return (
-    <div style={{ position: 'sticky', top: 110 }}>
-      <div className="chunky" style={{ padding: 22, transform: 'rotate(1.5deg)', background: 'var(--cream-2)' }}>
-        <div className="h-hand" style={{ fontSize: 26, color: 'var(--tomato)', marginBottom: 6 }}>preview!</div>
-        {parsed && parsed.rows.length ? (
-          <div style={{ fontSize: 13 }}>
-            <div style={{ marginBottom: 8 }}>
-              <span className="pill">{parsed.rows.length} time slots</span>{' '}
-              <span className="pill" style={{ background: 'var(--sun)' }}>{parsed.days.length} days</span>
-            </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: 'Nunito' }}>
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', fontSize: 11, padding: '4px 6px', background: 'var(--ink)', color: 'white', borderRadius: '6px 0 0 6px' }}>Time</th>
-                  {parsed.days.map((d, i) => (
-                    <th key={i} style={{ textAlign: 'left', fontSize: 11, padding: '4px 6px', background: 'var(--ink)', color: 'white' }}>{d.slice(0,3)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {parsed.rows.slice(0, 5).map((r, i) => (
-                  <tr key={i} style={{ borderBottom: '1px dashed rgba(0,0,0,.2)' }}>
-                    <td style={{ padding: '6px 4px', fontFamily: 'Baloo 2', fontWeight: 700, fontSize: 11 }}>{r.time}</td>
-                    {r.cells.map((c, j) => (
-                      <td key={j} style={{ padding: '6px 4px', fontSize: 11 }}>{(c.subject || '—').slice(0, 16)}{c.subject && c.subject.length > 16 ? '…' : ''}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {parsed.rows.length > 5 && <div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 6 }}>…and {parsed.rows.length - 5} more rows</div>}
-          </div>
-        ) : (
-          <div style={{ fontSize: 14, color: 'var(--ink-soft)', lineHeight: 1.6 }}>
-            Looks like nothing here yet. Paste a timetable and you&apos;ll see a sneaky preview ✨
-          </div>
-        )}
-      </div>
-
-      <div style={{ marginTop: 22, padding: 20, transform: 'rotate(-1deg)' }} className="chunky">
-        <div className="h-hand" style={{ fontSize: 24, color: 'var(--grape)', marginBottom: 6 }}>what you&apos;ll get</div>
-        <ul style={{ paddingLeft: 18, margin: 0, lineHeight: 1.7, fontSize: 14 }}>
-          <li>🎨 A themed timetable with colorful subjects</li>
-          <li>👕 Daily dress code suggestions</li>
-          <li>🖨️ Big enough to stick on your fridge</li>
-        </ul>
       </div>
     </div>
   );

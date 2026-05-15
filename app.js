@@ -1,47 +1,102 @@
 // Main app + Result panel (single page)
+// The final timetable is generated as an A4-portrait image by Azure gpt-image-2,
+// using the pasted / sampled / extracted text as the source of truth.
 
 const { useState: useStateApp, useMemo: useMemoApp, useRef: useRefApp, useEffect: useEffectApp } = React;
 
-function ResultPanel({ data, theme, onRestart, resultRef }) {
-  const subjectMap = useMemoApp(() => window.buildSubjectMap(data.rows, theme.palette.accent), [data, theme]);
-  const [downloading, setDownloading] = useStateApp(false);
-  const captureRef = useRefApp(null);
+// ---------- FUN WAITING SCREEN ----------
+const STAGE_INFO = {
+  reading: {
+    label: 'Step 1 of 2 · Reading your photo',
+    sub:   'gpt-4.1-nano is squinting at every cell',
+    emojis: ['🔍','📖','🧐','👀','📝','🔎','📋','✏️'],
+    messages: [
+      'Squinting at the rows…',
+      'Spotting Monday across the top…',
+      'Reading every cell carefully…',
+      'Sounding out subject names…',
+      'Counting time slots…',
+      'Decoding fancy handwriting…',
+    ],
+  },
+  painting: {
+    label: 'Step 2 of 2 · Painting the poster',
+    sub:   'gpt-image-2 is making it look amazing',
+    emojis: ['🎨','✏️','🖌️','🖍️','🌈','✨','🪄','🦄','📐','🧚','🪅','🍭'],
+    messages: [
+      'Sharpening crayons…',
+      'Mixing the paints…',
+      'Asking the muses for tips…',
+      'Drawing tiny stars in the margins…',
+      'Sprinkling some glitter…',
+      'Picking just the right fonts…',
+      'Convincing the pixels to behave…',
+      'Doodling cute borders…',
+      'Aligning Monday-through-Friday just so…',
+      'Painting Friday-afternoon vibes…',
+      'Adding one more sticker…',
+      'Polishing the title…',
+    ],
+  },
+};
 
-  const emojiForSubject = (subject) => {
-    const { cat } = window.categorizeSubject(subject);
-    return theme.subjectEmojis[cat] || theme.subjectEmojis.default || theme.emoji;
-  };
+function FunCountdown({ totalSeconds = 300, inkColor, stage = 'painting' }) {
+  const [secs, setSecs] = useStateApp(totalSeconds);
+  const [tick, setTick] = useStateApp(0);
+  const info = STAGE_INFO[stage] || STAGE_INFO.painting;
 
-  const dressCodes = useMemoApp(() => {
-    return data.days.map((day, di) => {
-      const cells = data.rows.map(r => r.cells[di]);
-      return { day, ...window.dressCodeForDay(day, cells) };
-    });
-  }, [data]);
+  useEffectApp(() => {
+    const id = setInterval(() => setSecs(s => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, []);
 
+  useEffectApp(() => {
+    const id = setInterval(() => setTick(t => t + 1), 2400);
+    return () => clearInterval(id);
+  }, []);
+
+  const pct = ((totalSeconds - secs) / totalSeconds) * 100;
+  const message = info.messages[tick % info.messages.length];
+  const emoji   = info.emojis[tick % info.emojis.length];
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+      padding: '48px 32px', textAlign: 'center', color: inkColor
+    }}>
+      <div className="pill" style={{ background: 'var(--sun)', color: 'var(--ink)' }}>
+        {info.label}
+      </div>
+      <div className="floaty" style={{ fontSize: 80, lineHeight: 1, '--r': '-4deg' }}>
+        {emoji}
+      </div>
+      <div className="h-display" style={{ fontSize: 22, opacity: .9, minHeight: 28 }}>
+        {message}
+      </div>
+      <div style={{
+        width: '85%', maxWidth: 420, height: 16,
+        border: '2px solid var(--ink)', borderRadius: 999,
+        background: 'white', overflow: 'hidden',
+        boxShadow: '3px 3px 0 var(--ink)'
+      }}>
+        <div style={{
+          width: `${pct}%`, height: '100%',
+          background: 'linear-gradient(90deg, var(--sun), var(--tomato))',
+          transition: 'width .8s linear'
+        }} />
+      </div>
+      <div style={{ fontSize: 12, opacity: .65, fontFamily: 'Baloo 2', fontWeight: 600 }}>
+        {info.sub}
+      </div>
+    </div>
+  );
+}
+
+// ---------- RESULT PANEL ----------
+function ResultPanel({ theme, aiImageUrl, aiError, generating, stage, onRegenerate, onRestart, resultRef }) {
   const isDark = theme.palette.tone === 'dark';
   const cardShadow = isDark ? '6px 6px 0 rgba(0,0,0,.55)' : '6px 6px 0 var(--ink)';
-
-  const downloadPng = async () => {
-    if (!captureRef.current || !window.htmlToImage) return;
-    setDownloading(true);
-    try {
-      const dataUrl = await window.htmlToImage.toPng(captureRef.current, {
-        pixelRatio: 2,
-        backgroundColor: undefined,
-        cacheBust: true
-      });
-      const link = document.createElement('a');
-      link.download = `timetable-${theme.name.toLowerCase().replace(/\s+/g, '-')}.png`;
-      link.href = dataUrl;
-      link.click();
-    } catch (e) {
-      console.error('PNG export failed', e);
-      alert('Couldn\'t save the image. Try printing to PDF instead.');
-    } finally {
-      setDownloading(false);
-    }
-  };
+  const downloadName = `timetable-${theme.name.toLowerCase().replace(/\s+/g, '-')}.png`;
 
   return (
     <div ref={resultRef} style={{
@@ -52,7 +107,7 @@ function ResultPanel({ data, theme, onRestart, resultRef }) {
     }}>
       {window.DecorPattern ? <window.DecorPattern theme={theme} /> : null}
 
-      <div style={{ position: 'relative', maxWidth: 1280, margin: '0 auto' }}>
+      <div style={{ position: 'relative', maxWidth: 1100, margin: '0 auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 22, flexWrap: 'wrap', gap: 12 }}>
           <div>
             <div className="pill" style={{ background: theme.palette.accent, color: isDark ? '#0b0b2a' : 'var(--ink)', borderColor: 'var(--ink)' }}>
@@ -66,110 +121,85 @@ function ResultPanel({ data, theme, onRestart, resultRef }) {
             }}>
               Here&apos;s your timetable!
             </h1>
+            <div style={{
+              fontSize: 13, marginTop: 6,
+              color: isDark ? '#fff6e0' : 'var(--ink-soft)',
+              opacity: .85, fontFamily: 'Baloo 2', fontWeight: 600
+            }}>
+              freshly painted by Azure gpt-image-2 · A4 landscape ✨
+            </div>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn-primary" onClick={downloadPng} disabled={downloading}>
-              {downloading ? (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                  <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} /> Saving…
-                </span>
-              ) : '⬇️ Download PNG'}
+            {aiImageUrl && (
+              <a className="btn btn-primary" href={aiImageUrl} download={downloadName} style={{ textDecoration: 'none' }}>
+                ⬇️ Download PNG
+              </a>
+            )}
+            <button className="btn" onClick={onRegenerate} disabled={generating}>
+              {generating ? '…' : '🔄 Regenerate'}
             </button>
-            <button className="btn" onClick={() => window.print()}>🖨️ Print</button>
             <button className="btn btn-go" onClick={onRestart}>↻ Start over</button>
           </div>
         </div>
 
-        {/* The captured area (timetable + sidebar) */}
-        <div ref={captureRef} style={{
-          padding: 24,
-          background: 'transparent',
+        {/* A4-landscape frame for the AI-generated image */}
+        <div className="tt-wrap" style={{
+          background: theme.palette.paper,
+          boxShadow: cardShadow,
+          padding: 16,
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 320px',
-          gap: 22,
-          alignItems: 'start'
-        }} className="capture-area">
-          {/* The timetable */}
-          <div className="tt-wrap" style={{ background: theme.palette.paper, boxShadow: cardShadow }}>
-            <div className="tt-grid">
-              <div className="tt-cell is-head" style={{ background: theme.palette.headBg, color: theme.palette.headInk, borderColor: 'var(--ink)' }}>
-                <div style={{ fontSize: 22 }}>⏰</div>
-                <div style={{ fontSize: 12, opacity: .8 }}>TIME</div>
+          placeItems: 'center',
+          // A4 landscape is 1.414:1 — frame ratio matches even while loading
+          aspectRatio: '1.414 / 1',
+          width: '100%',
+          maxWidth: 1040,
+          margin: '0 auto'
+        }}>
+          {generating ? (
+            <FunCountdown
+              key={stage}
+              totalSeconds={300}
+              inkColor={theme.palette.ink}
+              stage={stage}
+            />
+          ) : aiError ? (
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+              padding: 32, textAlign: 'center', maxWidth: 520, color: theme.palette.ink
+            }}>
+              <div style={{ fontSize: 48 }}>😵‍💫</div>
+              <div className="h-display" style={{ fontSize: 20 }}>
+                Image generation failed
               </div>
-              {data.days.map((d, i) => (
-                <div key={i} className="tt-cell is-head" style={{ background: theme.palette.headBg, color: theme.palette.headInk, borderColor: 'var(--ink)' }}>
-                  {d}
-                </div>
-              ))}
-
-              {data.rows.map((row, ri) => (
-                <React.Fragment key={ri}>
-                  <div className="tt-cell is-time" style={{ color: theme.palette.ink, background: isDark ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.05)', borderColor: 'var(--ink)' }}>
-                    {row.time}
-                  </div>
-                  {row.cells.map((cell, ci) => {
-                    const subj = cell.subject;
-                    const meta = subj ? subjectMap.get(subj.trim()) : null;
-                    return (
-                      <div key={ci} className="tt-cell" style={{
-                        background: meta ? meta.bg : 'transparent',
-                        borderColor: 'var(--ink)'
-                      }}>
-                        {subj ? (
-                          <div className="subj-tag">
-                            <div className="subj-emoji">{emojiForSubject(subj)}</div>
-                            <div className="subj-name">{subj}</div>
-                          </div>
-                        ) : <div style={{ opacity: .3, fontSize: 12 }}>—</div>}
-                      </div>
-                    );
-                  })}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-
-          {/* Sidebar: legend + dress codes */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <div className="chunky" style={{ padding: 16, background: theme.palette.paper, color: theme.palette.ink, boxShadow: cardShadow, transform: 'rotate(.5deg)' }}>
-              <div className="h-hand" style={{ fontSize: 24, color: theme.palette.accent, marginBottom: 6, textShadow: isDark ? '1px 1px 0 rgba(0,0,0,.6)' : 'none' }}>color key</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {[...subjectMap.entries()].map(([name, meta]) => (
-                  <div key={name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-                    <span style={{
-                      width: 16, height: 16, borderRadius: 6,
-                      background: meta.bg, border: '1.5px solid var(--ink)', flex: '0 0 auto'
-                    }} />
-                    <span style={{ fontFamily: 'Baloo 2', fontWeight: 600 }}>{emojiForSubject(name)} {name}</span>
-                  </div>
-                ))}
+              <div style={{ fontSize: 13, opacity: .8, lineHeight: 1.5 }}>
+                {aiError}
               </div>
+              <button className="btn btn-primary" onClick={onRegenerate}>🔁 Try again</button>
             </div>
-
-            <div className="chunky" style={{ padding: 16, background: theme.palette.paper, color: theme.palette.ink, boxShadow: cardShadow, transform: 'rotate(-.7deg)' }}>
-              <div className="h-hand" style={{ fontSize: 28, color: theme.palette.accent, marginBottom: 2, textShadow: isDark ? '1px 1px 0 rgba(0,0,0,.6)' : 'none' }}>dress code</div>
-              <div style={{ fontSize: 12, opacity: .75, marginBottom: 10 }}>what to wear each day</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {dressCodes.map((dc, i) => (
-                  <div key={i} style={{
-                    borderTop: '1.5px dashed currentColor', paddingTop: 8, opacity: .95
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 6 }}>
-                      <div className="h-display" style={{ fontWeight: 800, fontSize: 16 }}>{dc.day}</div>
-                      <div style={{ fontSize: 11, fontFamily: 'Baloo 2', fontWeight: 700, padding: '2px 8px', background: theme.palette.accent, color: isDark ? '#0b0b2a' : 'var(--ink)', borderRadius: 999, border: '1.5px solid var(--ink)' }}>{dc.label}</div>
-                    </div>
-                    <div style={{ fontSize: 12.5, marginTop: 4, lineHeight: 1.5 }}>
-                      {dc.items.join(' · ')}
-                    </div>
-                    <div className="h-hand" style={{ fontSize: 16, marginTop: 2, opacity: .8 }}>{dc.vibe}</div>
-                  </div>
-                ))}
-              </div>
+          ) : aiImageUrl ? (
+            <img
+              id="ai-generated-image"
+              src={aiImageUrl}
+              alt="AI generated timetable"
+              style={{
+                width: '100%', height: '100%', display: 'block',
+                objectFit: 'contain',
+                borderRadius: 10,
+                border: '2.5px solid var(--ink)'
+              }}
+            />
+          ) : (
+            <div style={{ padding: 40, color: theme.palette.ink, opacity: .6 }}>
+              No image yet.
             </div>
-          </div>
+          )}
         </div>
 
-        <div style={{ fontSize: 12, color: isDark ? '#fff6e0' : 'var(--ink)', opacity: .75, textAlign: 'center', marginTop: 16 }}>
+        <div style={{
+          fontSize: 12,
+          color: isDark ? '#fff6e0' : 'var(--ink)',
+          opacity: .75, textAlign: 'center', marginTop: 16
+        }}>
           made with 💛 by your timetable decorator
         </div>
       </div>
@@ -177,7 +207,7 @@ function ResultPanel({ data, theme, onRestart, resultRef }) {
       <style>{`
         @media print {
           body { background: white !important; }
-          .topbar, .btn, button { display: none !important; }
+          .topbar, .btn, button, a.btn { display: none !important; }
           .tt-wrap { box-shadow: none !important; }
         }
       `}</style>
@@ -188,19 +218,17 @@ function ResultPanel({ data, theme, onRestart, resultRef }) {
 // ---------- MAIN APP ----------
 function App() {
   const [rawText, setRawText] = useStateApp('');
+  const [uploadedFile, setUploadedFile] = useStateApp(null);
   const [themePrompt, setThemePrompt] = useStateApp('');
   const [activeTheme, setActiveTheme] = useStateApp(null);
   const [generating, setGenerating] = useStateApp(false);
+  const [stage, setStage] = useStateApp('painting'); // 'reading' | 'painting'
+  const [aiImageUrl, setAiImageUrl] = useStateApp(null);
+  const [aiError, setAiError] = useStateApp(null);
   const resultRef = useRefApp(null);
 
-  const parsed = useMemoApp(() => {
-    try { return window.parseTimetable(rawText); } catch { return null; }
-  }, [rawText]);
-
-  // Scroll to result whenever a new theme is set
   useEffectApp(() => {
     if (activeTheme && resultRef.current) {
-      // small delay so DOM is ready
       setTimeout(() => {
         const top = resultRef.current.getBoundingClientRect().top + window.scrollY - 70;
         window.scrollTo({ top, behavior: 'smooth' });
@@ -208,23 +236,19 @@ function App() {
     }
   }, [activeTheme]);
 
-  const generateTheme = async () => {
-    if (!themePrompt.trim() || !parsed) return;
-    setGenerating(true);
-    const promptLower = themePrompt.toLowerCase();
+  // Resolve a theme (preset match or chat-generated palette) for page chrome.
+  async function resolveTheme(prompt) {
+    const lower = prompt.toLowerCase();
     const presetMatch = window.THEME_PRESETS.find(p =>
-      promptLower.includes(p.id) || promptLower.includes(p.name.toLowerCase())
+      lower.includes(p.id) || lower.includes(p.name.toLowerCase())
     );
-    if (presetMatch) {
-      setActiveTheme(presetMatch);
-      setGenerating(false);
-      return;
-    }
+    if (presetMatch) return presetMatch;
+
     try {
       const result = await window.claude.complete({
         messages: [{
           role: 'user',
-          content: `Design a kid-friendly timetable theme inspired by: "${themePrompt}".
+          content: `Design a kid-friendly timetable theme inspired by: "${prompt}".
 Return ONLY a JSON object (no fences, no commentary):
 {
   "name": "Short Theme Name",
@@ -246,20 +270,73 @@ Return ONLY a JSON object (no fences, no commentary):
       const match = result.match(/\{[\s\S]*\}/);
       if (!match) throw new Error('no json');
       const t = JSON.parse(match[0]);
-      setActiveTheme({
+      return {
         id: 'custom',
-        name: t.name || themePrompt,
+        name: t.name || prompt,
         emoji: t.emoji || '✨',
         preview: (t.decorations || ['✨']).slice(0, 6),
         palette: { tone: 'light', ...(t.palette || {}) },
         decorations: t.decorations || ['✨','⭐','💫','🌟','✨','🌈'],
         subjectEmojis: t.subjectEmojis || { default: '✨' },
         pattern: 'dots',
-        prompt: themePrompt
-      });
+        prompt
+      };
     } catch (e) {
-      console.warn(e);
-      setActiveTheme(window.THEME_PRESETS[0]);
+      console.warn('theme generation fell back to preset', e);
+      return window.THEME_PRESETS[0];
+    }
+  }
+
+  const decorate = async () => {
+    if (!themePrompt.trim() || (!rawText.trim() && !uploadedFile)) return;
+
+    // Show the result panel + progress bar IMMEDIATELY, before any API call.
+    setGenerating(true);
+    setAiError(null);
+    setAiImageUrl(null);
+    setStage(!rawText.trim() && uploadedFile ? 'reading' : 'painting');
+    if (!activeTheme) setActiveTheme(window.THEME_PRESETS[0]); // placeholder chrome
+
+    try {
+      // Theme palette can resolve concurrently with the vision call.
+      const themePromise = resolveTheme(themePrompt);
+
+      // ── Call 1: gpt-4.1-nano vision (only if user uploaded an image) ──
+      let text = rawText;
+      if (!text.trim() && uploadedFile) {
+        text = await window.azure.extractTimetableFromImage(uploadedFile);
+        if (text) setRawText(text.trim());
+      }
+
+      const theme = await themePromise;
+      setActiveTheme(theme);
+
+      // ── Call 2: gpt-image-2 generates the themed timetable poster ──
+      setStage('painting');
+      const url = await window.azure.generateImageFromText(text, themePrompt);
+      if (!url) throw new Error('Azure returned no image — check your image deployment name and quota.');
+      setAiImageUrl(url);
+    } catch (e) {
+      console.error('decorate failed', e);
+      setAiError(e.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const regenerate = async () => {
+    if (!themePrompt.trim() || !rawText.trim()) return;
+    setGenerating(true);
+    setStage('painting');
+    setAiError(null);
+    setAiImageUrl(null);
+    try {
+      const url = await window.azure.generateImageFromText(rawText, themePrompt);
+      if (!url) throw new Error('Azure returned no image — check your image deployment name and quota.');
+      setAiImageUrl(url);
+    } catch (e) {
+      console.error('regenerate failed', e);
+      setAiError(e.message);
     } finally {
       setGenerating(false);
     }
@@ -267,6 +344,9 @@ Return ONLY a JSON object (no fences, no commentary):
 
   const restart = () => {
     setActiveTheme(null);
+    setAiImageUrl(null);
+    setAiError(null);
+    setUploadedFile(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -278,24 +358,30 @@ Return ONLY a JSON object (no fences, no commentary):
           <div>Timetable Decorator</div>
         </div>
         <div style={{ fontSize: 13, color: 'var(--ink-soft)', fontFamily: 'Baloo 2', fontWeight: 600 }}>
-          paste → theme → download
+          paste → theme → AI image
         </div>
       </div>
 
       <window.UploadScreen
         value={rawText}
         onChange={setRawText}
+        uploadedFile={uploadedFile}
+        setUploadedFile={setUploadedFile}
         themePrompt={themePrompt}
         setThemePrompt={setThemePrompt}
         generating={generating}
-        onGenerate={generateTheme}
+        onGenerate={decorate}
         hasResult={!!activeTheme}
       />
 
-      {parsed && activeTheme && (
+      {activeTheme && (
         <ResultPanel
-          data={parsed}
           theme={activeTheme}
+          aiImageUrl={aiImageUrl}
+          aiError={aiError}
+          generating={generating}
+          stage={stage}
+          onRegenerate={regenerate}
           onRestart={restart}
           resultRef={resultRef}
         />

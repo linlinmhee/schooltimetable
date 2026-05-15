@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "mcp__claude_ai_Microsoft_Learn__microsoft_docs_search"
+      "mcp__claude_ai_Microsoft_Learn__microsoft_docs_search",
+      "PowerShell(python --version)",
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "PowerShell(npx --yes serve . -l 8000)"
     ]
   }
 }
