@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Timetable Decorator</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --cream: #fdf7ec;
+    --cream-2: #f6efe0;
+    --ink: #2a1f1a;
+    --ink-soft: #5a4a40;
+    --line: #2a1f1a;
+    --sun: #ffc341;
+    --tomato: #ff6b4a;
+    --grape: #8a6bff;
+    --leaf: #4cb963;
+    --sky: #59b3ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; }
+  body {
+    font-family: 'Nunito', system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--cream);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  #root { min-height: 100vh; }
+
+  .h-hand { font-family: 'Caveat', cursive; }
+  .h-display { font-family: 'Baloo 2', system-ui, sans-serif; }
+
+  /* App chrome ---------- */
+  .app-shell {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 28px;
+    border-bottom: 2px solid var(--ink);
+    background: var(--cream);
+    position: sticky; top: 0; z-index: 30;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 12px;
+    font-family: 'Baloo 2', sans-serif; font-weight: 800;
+    font-size: 22px;
+  }
+  .brand-mark {
+    width: 38px; height: 38px;
+    background: var(--sun);
+    border: 2px solid var(--ink);
+    border-radius: 12px;
+    display: grid; place-items: center;
+    font-size: 22px;
+    transform: rotate(-6deg);
+    box-shadow: 3px 3px 0 var(--ink);
+  }
+  .stepper {
+    display: flex; align-items: center; gap: 10px;
+    font-family: 'Baloo 2', sans-serif; font-weight: 700;
+    font-size: 14px;
+  }
+  .step-dot {
+    width: 28px; height: 28px;
+    border: 2px solid var(--ink);
+    border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--cream);
+    font-size: 13px;
+  }
+  .step-dot.active { background: var(--sun); box-shadow: 2px 2px 0 var(--ink); }
+  .step-dot.done { background: var(--leaf); color: white; }
+  .step-bar { width: 28px; height: 2px; background: var(--ink); opacity: .4; }
+
+  .page {
+    flex: 1;
+    padding: 36px 28px 80px;
+    max-width: 1280px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  /* Cards / chunky elements ---- */
+  .chunky {
+    border: 2px solid var(--ink);
+    border-radius: 18px;
+    background: white;
+    box-shadow: 5px 5px 0 var(--ink);
+  }
+  .chunky-soft {
+    border: 2px solid var(--ink);
+    border-radius: 18px;
+    background: white;
+  }
+
+  /* Buttons ---- */
+  .btn {
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 700;
+    font-size: 17px;
+    padding: 12px 22px;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    background: white;
+    color: var(--ink);
+    cursor: pointer;
+    box-shadow: 4px 4px 0 var(--ink);
+    transition: transform .08s ease, box-shadow .08s ease;
+  }
+  .btn:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--ink); }
+  .btn:active { transform: translate(2px, 2px); box-shadow: 2px 2px 0 var(--ink); }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: var(--sun); }
+  .btn-go { background: var(--tomato); color: white; }
+  .btn-ghost { background: transparent; box-shadow: none; border-style: dashed; }
+  .btn-ghost:hover { box-shadow: 3px 3px 0 var(--ink); border-style: solid; }
+  .btn-sm { padding: 8px 14px; font-size: 14px; border-radius: 10px; box-shadow: 3px 3px 0 var(--ink); }
+
+  /* Inputs */
+  .input, .textarea {
+    width: 100%;
+    font-family: 'Nunito', sans-serif;
+    font-size: 15px;
+    padding: 14px 16px;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    background: white;
+    color: var(--ink);
+    outline: none;
+    resize: vertical;
+  }
+  .textarea { font-family: 'JetBrains Mono', ui-monospace, monospace; line-height: 1.55; }
+  .input:focus, .textarea:focus { box-shadow: 4px 4px 0 var(--ink); }
+
+  /* Pills */
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border: 2px solid var(--ink); border-radius: 999px;
+    background: white; font-weight: 700; font-size: 12px;
+    font-family: 'Baloo 2', sans-serif;
+  }
+
+  /* Decorative blobs floating in background */
+  .blob {
+    position: absolute; pointer-events: none; opacity: .9;
+    filter: drop-shadow(2px 2px 0 var(--ink));
+  }
+
+  /* Timetable grid ---------- */
+  .tt-wrap {
+    border: 3px solid var(--ink);
+    border-radius: 24px;
+    overflow: hidden;
+    background: white;
+    box-shadow: 8px 8px 0 var(--ink);
+  }
+  .tt-grid {
+    display: grid;
+    grid-template-columns: 110px repeat(5, 1fr);
+  }
+  .tt-cell {
+    border-right: 2px solid var(--ink);
+    border-bottom: 2px solid var(--ink);
+    padding: 12px 10px;
+    position: relative;
+    min-height: 78px;
+  }
+  .tt-cell:last-child { border-right: none; }
+  .tt-row:last-child .tt-cell { border-bottom: none; }
+  .tt-grid > .tt-cell.is-time {
+    background: rgba(0,0,0,.04);
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 700;
+    text-align: center;
+    display: grid; place-items: center;
+    font-size: 13px;
+    line-height: 1.2;
+  }
+  .tt-grid > .tt-cell.is-head {
+    background: var(--ink); color: white;
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 800;
+    font-size: 18px;
+    text-align: center; padding: 14px 8px;
+    border-bottom: 2px solid var(--ink);
+  }
+  .subj-tag {
+    display: flex; flex-direction: column; gap: 4px;
+    height: 100%; justify-content: center;
+  }
+  .subj-emoji { font-size: 22px; line-height: 1; }
+  .subj-name {
+    font-family: 'Baloo 2', sans-serif;
+    font-weight: 700;
+    font-size: 13.5px;
+    line-height: 1.15;
+    color: var(--ink);
+  }
+
+  /* Loader */
+  .spinner {
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 3px solid var(--ink); border-top-color: transparent;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @keyframes wiggle {
+    0%,100% { transform: rotate(-2deg); }
+    50% { transform: rotate(2deg); }
+  }
+  .wiggle { animation: wiggle 2.4s ease-in-out infinite; }
+  @keyframes float {
+    0%,100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+    50% { transform: translateY(-8px) rotate(var(--r, 0deg)); }
+  }
+  .floaty { animation: float 4s ease-in-out infinite; }
+
+  /* Tweaks */
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--ink); color: var(--cream);
+    padding: 10px 18px; border-radius: 999px;
+    font-family: 'Baloo 2'; font-weight: 700;
+    z-index: 100;
+    border: 2px solid var(--ink);
+  }
+
+  /* responsive-ish */
+  @media (max-width: 880px) {
+    .tt-grid { grid-template-columns: 80px repeat(5, 1fr); }
+    .subj-name { font-size: 11px; }
+    .subj-emoji { font-size: 18px; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/html-to-image/dist/html-to-image.min.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="azure.js"></script>
+<script type="text/babel" src="themes.js"></script>
+<script type="text/babel" src="parse.js"></script>
+<script type="text/babel" src="screens.js"></script>
+<script type="text/babel" src="app.js"></script>
+</body>
+</html>
