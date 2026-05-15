@@ -5,6 +5,14 @@
 [build]
   publish = "."
 
+# Tell Netlify's secret scanner which env vars are NOT secrets. The API
+# version, deployment names, and endpoint host are public Azure identifiers
+# that legitimately appear in code/comments/UI strings — only the actual
+# API key needs scanning. Without this, the build fails because non-secret
+# env var values match strings in committed files.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "AZURE_OPENAI_API_VERSION,AZURE_OPENAI_CHAT_DEPLOYMENT,AZURE_OPENAI_IMAGE_DEPLOYMENT,AZURE_OPENAI_ENDPOINT"
+
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
