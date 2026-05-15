@@ -1,98 +1,43 @@
-// ─── Azure OpenAI Client ───────────────────────────────────────────────────
+// ─── Azure OpenAI Client (browser side) ──────────────────────────────────
 // Public API on `window.azure`:
-//   complete({ messages, temperature?, max_tokens? })       → string (chat / vision)
-//   extractTimetableFromImage(file)                         → string (markdown-ish table)
-//   generateImageFromText(timetableText, themeText)         → string (image URL or data URL)
-//   generateTimetableImage(file, themeText)                 → { textResult, imageUrl }
+//   complete({ messages, temperature?, max_completion_tokens? })  → string
+//   extractTimetableFromImage(file)                               → string
+//   generateImageFromText(timetableText, themeText)               → image URL / data URL
+//   generateTimetableImage(file, themeText)                       → { textResult, imageUrl }
 //
-// Credentials are read from a sibling `.env` file at runtime via fetch().
-// The page MUST be served by a local web server — opening index.html
-// directly via file:// will block the fetch.
+// All requests are routed through the Netlify Function at
+// /.netlify/functions/azure, which holds the real Azure API key in
+// server-side environment variables. Nothing sensitive ships to the browser.
+//
+// Local development: run `netlify dev` (npm i -g netlify-cli) so the
+// /.netlify/functions/azure endpoint is reachable on http://localhost:8888.
+// A plain static server (npx serve) will NOT work — the function won't exist.
 
 (function () {
-  // ── Lazy .env loader ──────────────────────────────────────────────────────
-  let configPromise = null;
+  const PROXY_URL = "/.netlify/functions/azure";
 
-  function loadConfig() {
-    if (configPromise) return configPromise;
-    configPromise = fetch(".env", { cache: "no-store" })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.text();
-      })
-      .then(parseEnv)
-      .then((env) => {
-        const cfg = {
-          apiKey:          env.AZURE_OPENAI_API_KEY,
-          endpoint:        (env.AZURE_OPENAI_ENDPOINT || "").replace(/\/+$/, ""),
-          apiVersion:      env.AZURE_OPENAI_API_VERSION  || "2025-01-01-preview",
-          chatDeployment:  env.AZURE_OPENAI_CHAT_DEPLOYMENT  || "gpt-4.1-nano",
-          imageDeployment: env.AZURE_OPENAI_IMAGE_DEPLOYMENT || "gpt-image-2",
-        };
-        if (!cfg.apiKey || !cfg.endpoint) {
-          throw new Error("Missing AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT in .env");
-        }
-        return cfg;
-      })
-      .catch((err) => {
-        configPromise = null; // allow retry
-        throw new Error(
-          `Could not load .env (${err.message}). ` +
-          `Make sure the app is served via a local web server, not opened as file://.`
-        );
-      });
-    return configPromise;
-  }
-
-  function parseEnv(text) {
-    const out = {};
-    for (const rawLine of text.split(/\r?\n/)) {
-      const line = rawLine.trim();
-      if (!line || line.startsWith("#")) continue;
-      const eq = line.indexOf("=");
-      if (eq === -1) continue;
-      const key = line.slice(0, eq).trim();
-      let val = line.slice(eq + 1).trim();
-      if ((val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      out[key] = val;
-    }
-    return out;
-  }
-
-  // ── URL builders ──────────────────────────────────────────────────────────
-  const chatUrl     = (cfg) => `${cfg.endpoint}/openai/deployments/${cfg.chatDeployment}/chat/completions?api-version=${cfg.apiVersion}`;
-  const imageGenUrl = (cfg) => `${cfg.endpoint}/openai/deployments/${cfg.imageDeployment}/images/generations?api-version=${cfg.apiVersion}`;
-
-  async function post(cfg, url, body) {
-    const res = await fetch(url, {
+  async function callProxy(action, payload) {
+    const res = await fetch(PROXY_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "api-key": cfg.apiKey,
-      },
-      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, payload }),
     });
+    const text = await res.text();
+    let data;
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { rawText: text }; }
     if (!res.ok) {
-      const errText = await res.text().catch(() => res.statusText);
-      throw new Error(`Azure API error ${res.status}: ${errText}`);
+      const msg = data?.error?.message || data?.error || data?.rawText || res.statusText;
+      throw new Error(`Proxy ${res.status}: ${msg}`);
     }
-    return res.json();
+    return data;
   }
 
   // ── Chat / vision completions ─────────────────────────────────────────────
   // max_completion_tokens is OPTIONAL — omit to let the model use its full budget.
   async function complete({ messages, temperature = 0.7, max_completion_tokens }) {
-    const cfg = await loadConfig();
-    const body = {
-      model: cfg.chatDeployment,
-      messages,
-      temperature,
-    };
+    const body = { messages, temperature };
     if (max_completion_tokens != null) body.max_completion_tokens = max_completion_tokens;
-    const data = await post(cfg, chatUrl(cfg), body);
+    const data = await callProxy("chat", body);
     return data.choices?.[0]?.message?.content ?? "";
   }
 
@@ -125,8 +70,6 @@
 
   // ── Image generation from timetable text + theme ──────────────────────────
   async function generateImageFromText(timetableText, themeText) {
-    const cfg = await loadConfig();
-
     const prompt =
       `Design a colorful, kid-friendly school timetable POSTER in the theme of "${themeText}". ` +
       `IMPORTANT format: A4 LANDSCAPE orientation — wider than tall, like a placemat or whiteboard. ` +
@@ -144,8 +87,7 @@
       `Use exactly this timetable content:\n` +
       `${timetableText}`;
 
-    const imgData = await post(cfg, imageGenUrl(cfg), {
-      model: cfg.imageDeployment,
+    const data = await callProxy("image", {
       prompt,
       n: 1,
       size: "1536x1024",
@@ -153,13 +95,13 @@
       output_format: "png",
     });
 
-    const img = imgData.data?.[0];
+    const img = data.data?.[0];
     if (img?.url)      return img.url;
     if (img?.b64_json) return `data:image/png;base64,${img.b64_json}`;
     return "";
   }
 
-  // ── Convenience: image file → extracted text → generated image ───────────
+  // ── Convenience: image file → extracted text → generated image ────────────
   async function generateTimetableImage(imageFile, themeText) {
     const textResult = await extractTimetableFromImage(imageFile);
     const imageUrl   = await generateImageFromText(textResult, themeText);
@@ -176,7 +118,6 @@
     });
   }
 
-  // ── Expose globally ───────────────────────────────────────────────────────
   window.azure = {
     complete,
     extractTimetableFromImage,
