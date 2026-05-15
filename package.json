@@ -1,0 +1,10 @@
+{
+  "name": "schooltimetable",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Timetable Decorator — Azure-powered themed poster generator.",
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^8.0.0"
+  }
+}

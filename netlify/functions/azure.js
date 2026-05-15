@@ -1,18 +1,14 @@
-// Netlify serverless proxy for Azure OpenAI.
-// The browser calls /.netlify/functions/azure with an { action, payload } body;
-// this function reads the API key from Netlify environment variables
-// (NEVER exposed to the browser) and forwards the request to Azure.
+// Netlify serverless proxy for the Azure CHAT/VISION endpoint only.
+// Image generation lives in `azure-image-background.js` because it can
+// exceed the 26-second sync function ceiling on Netlify.
 //
-// Required env vars in Netlify (Site settings → Environment variables):
+// Required env vars (set in Netlify dashboard, no defaults in code):
 //   AZURE_OPENAI_API_KEY
 //   AZURE_OPENAI_ENDPOINT
 //   AZURE_OPENAI_API_VERSION
 //   AZURE_OPENAI_CHAT_DEPLOYMENT
-//   AZURE_OPENAI_IMAGE_DEPLOYMENT
-// All are required (no defaults baked in) so that committed code contains
-// nothing matching env var values — keeps Netlify's secret scanner happy.
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (event.httpMethod !== "POST") {
     return jsonResponse(405, { error: "Method not allowed" });
   }
@@ -22,22 +18,19 @@ exports.handler = async (event) => {
     AZURE_OPENAI_ENDPOINT: rawEndpoint,
     AZURE_OPENAI_API_VERSION: apiVersion,
     AZURE_OPENAI_CHAT_DEPLOYMENT: chatDeployment,
-    AZURE_OPENAI_IMAGE_DEPLOYMENT: imageDeployment,
   } = process.env;
 
   const missing = [
-    !apiKey          && "AZURE_OPENAI_API_KEY",
-    !rawEndpoint     && "AZURE_OPENAI_ENDPOINT",
-    !apiVersion      && "AZURE_OPENAI_API_VERSION",
-    !chatDeployment  && "AZURE_OPENAI_CHAT_DEPLOYMENT",
-    !imageDeployment && "AZURE_OPENAI_IMAGE_DEPLOYMENT",
+    !apiKey         && "AZURE_OPENAI_API_KEY",
+    !rawEndpoint    && "AZURE_OPENAI_ENDPOINT",
+    !apiVersion     && "AZURE_OPENAI_API_VERSION",
+    !chatDeployment && "AZURE_OPENAI_CHAT_DEPLOYMENT",
   ].filter(Boolean);
   if (missing.length) {
     return jsonResponse(500, {
       error: `Server is missing required env vars: ${missing.join(", ")}`,
     });
   }
-  const endpoint = rawEndpoint.replace(/\/+$/, "");
 
   let body;
   try {
@@ -47,14 +40,14 @@ exports.handler = async (event) => {
   }
   const { action, payload = {} } = body;
 
-  let url;
-  if (action === "chat") {
-    url = `${endpoint}/openai/deployments/${chatDeployment}/chat/completions?api-version=${apiVersion}`;
-  } else if (action === "image") {
-    url = `${endpoint}/openai/deployments/${imageDeployment}/images/generations?api-version=${apiVersion}`;
-  } else {
-    return jsonResponse(400, { error: `Unknown action: ${action}. Expected 'chat' or 'image'.` });
+  if (action !== "chat") {
+    return jsonResponse(400, {
+      error: `Unsupported action: ${action}. Use POST /.netlify/functions/azure-image-background for image generation.`,
+    });
   }
+
+  const endpoint = rawEndpoint.replace(/\/+$/, "");
+  const url = `${endpoint}/openai/deployments/${chatDeployment}/chat/completions?api-version=${apiVersion}`;
 
   try {
     const azureRes = await fetch(url, {

@@ -5,19 +5,23 @@
 //   generateImageFromText(timetableText, themeText)               → image URL / data URL
 //   generateTimetableImage(file, themeText)                       → { textResult, imageUrl }
 //
-// All requests are routed through the Netlify Function at
-// /.netlify/functions/azure, which holds the real Azure API key in
-// server-side environment variables. Nothing sensitive ships to the browser.
+// Architecture (so the Azure API key never reaches the browser):
+//   - chat / vision  → POST /.netlify/functions/azure              (sync, fast)
+//   - image gen      → POST /.netlify/functions/azure-image-background (returns 202)
+//                      then GET /.netlify/functions/azure-image-status?jobId=...
+//                      until the job resolves. Required because gpt-image-2
+//                      can exceed Netlify's 26s sync ceiling.
 //
-// Local development: run `netlify dev` (npm i -g netlify-cli) so the
-// /.netlify/functions/azure endpoint is reachable on http://localhost:8888.
-// A plain static server (npx serve) will NOT work — the function won't exist.
+// Local development: run `netlify dev` (npm i -g netlify-cli). A plain
+// static server (npx serve) won't have the functions.
 
 (function () {
-  const PROXY_URL = "/.netlify/functions/azure";
+  const CHAT_URL          = "/.netlify/functions/azure";
+  const IMAGE_BG_URL      = "/.netlify/functions/azure-image-background";
+  const IMAGE_STATUS_URL  = "/.netlify/functions/azure-image-status";
 
   async function callProxy(action, payload) {
-    const res = await fetch(PROXY_URL, {
+    const res = await fetch(CHAT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action, payload }),
@@ -30,6 +34,41 @@
       throw new Error(`Proxy ${res.status}: ${msg}`);
     }
     return data;
+  }
+
+  async function runImageJob(payload) {
+    const jobId = (crypto.randomUUID && crypto.randomUUID()) ||
+                  `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const startRes = await fetch(IMAGE_BG_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId, payload }),
+    });
+    if (startRes.status !== 202) {
+      const t = await startRes.text().catch(() => "");
+      throw new Error(`Failed to start image job (${startRes.status}): ${t || startRes.statusText}`);
+    }
+
+    const POLL_MS  = 3000;
+    const MAX_WAIT = 10 * 60 * 1000; // 10 min hard ceiling
+    const started  = Date.now();
+
+    while (Date.now() - started < MAX_WAIT) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      try {
+        const sRes = await fetch(`${IMAGE_STATUS_URL}?jobId=${encodeURIComponent(jobId)}`);
+        if (!sRes.ok) continue; // transient — keep polling
+        const job = await sRes.json();
+        if (job.status === "done")  return job.imageUrl || "";
+        if (job.status === "error") throw new Error(job.error || "Image generation failed");
+        // status === "pending" → keep polling
+      } catch (e) {
+        // Network blips during polling shouldn't kill the whole job — only
+        // re-throw if the server explicitly reported an error.
+        if (e.message?.startsWith("Image") || e.message?.startsWith("Azure")) throw e;
+      }
+    }
+    throw new Error("Image generation timed out after 10 minutes");
   }
 
   // ── Chat / vision completions ─────────────────────────────────────────────
@@ -87,18 +126,13 @@
       `Use exactly this timetable content:\n` +
       `${timetableText}`;
 
-    const data = await callProxy("image", {
+    return runImageJob({
       prompt,
       n: 1,
       size: "1536x1024",
       quality: "high",
       output_format: "png",
     });
-
-    const img = data.data?.[0];
-    if (img?.url)      return img.url;
-    if (img?.b64_json) return `data:image/png;base64,${img.b64_json}`;
-    return "";
   }
 
   // ── Convenience: image file → extracted text → generated image ────────────
