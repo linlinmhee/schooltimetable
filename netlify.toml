@@ -4,25 +4,14 @@
 
 [build]
   publish = "."
-  functions = "netlify/functions"
 
 [functions]
-  # Raise the sync timeout from the 10s default. gpt-image-2 at high quality
-  # can take 20-30+ seconds; 26s is the current max for sync functions on the
-  # free + Pro plans. If you need longer, lower image quality in azure.js
-  # (high → medium) or migrate the image call to a Background Function.
-  timeout = 26
+  directory = "netlify/functions"
   node_bundler = "esbuild"
 
-# Don't deploy the local-dev .env even if it accidentally ends up in the
-# publish directory (it's gitignored already, but belt-and-suspenders).
-[[headers]]
-  for = "/.env*"
-  [headers.values]
-    X-Content-Type-Options = "nosniff"
-
-[[redirects]]
-  from = "/.env*"
-  to = "/404.html"
-  status = 404
-  force = true
+# NOTE on function timeout: it cannot be set in netlify.toml. The default
+# sync timeout is 10 s, configurable up to 26 s in
+#   Site settings → Functions → Settings → "Function timeout".
+# gpt-image-2 at quality:"high" can exceed 26 s — if that happens, either
+# lower image quality in azure.js (high → medium) or migrate the image
+# call to a Background Function.
